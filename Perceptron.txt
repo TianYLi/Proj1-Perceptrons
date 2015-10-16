@@ -1,0 +1,404 @@
+/**
+ * Created by Jack Li on 9/27/2015.
+ */
+import java.io.*;
+import java.lang.reflect.Array;
+import java.util.ArrayList;
+import java.util.Scanner;
+import java.util.concurrent.ThreadLocalRandom;
+
+public class Perceptron {
+    public static void main (String[] args) throws IOException{
+
+        //main mostly consists of the menu and getting user input
+        BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
+        System.out.println("Welcome to my first neural network - A Perceptron Net!"); //title
+        while(true) {
+                    System.out.println();
+                    int input = 0;
+                    System.out.println("Enter 1 to train using a training data file, enter 2 to train using a trained weight settings data file:");
+                    input = Integer.parseInt(br.readLine());
+                    //System.out.println("You entered: " + input);
+                    if (input == 1) {
+                        String inputFile = br.readLine();
+                        inputFile = inputFile.concat(".txt");
+                        //System.out.println("You entered: " + inputFile);
+                        int weight = 2;
+                        while (weight != 0 && weight != 1) {
+                            System.out.println("Enter 0 to initialize weights to 0, enter 1 to initialize weights to random values between -0.5 and 0.5:");
+                            weight = Integer.parseInt(br.readLine());
+                        }
+                        System.out.println("Enter the maximum number of training epochs:");
+                        int epochs = Integer.parseInt(br.readLine());
+                        System.out.println("Enter a file name to save the trained weights settings:");
+                        String outputFile = br.readLine();
+                        double alpha = 0.0;
+                        while (alpha <= 0 || alpha > 1) {
+                            System.out.println("Enter the learning rate alpha from 0 to 1 but not including 0:");
+                            alpha = Double.parseDouble(br.readLine());
+                        }
+                        System.out.println("Enter the threshold theta:");
+                        double theta = Double.parseDouble(br.readLine());
+                        BasicTrain(inputFile, outputFile, weight, epochs, alpha, theta);
+                    }
+                    if (input == 2) {
+                        System.out.println("Enter the weight settings input data file name:");
+                        String inputFile = br.readLine();
+                        inputFile = inputFile.concat(".txt");
+                        WeightDeploy(inputFile);
+                    }
+                    else
+                        System.out.println("Invalid input, try again.");
+        }
+    }
+
+    private static void BasicTrain(String input, String output, int w, int epochs, double alpha, double theta) throws IOException {
+
+        //reading files
+        FileInputStream fstream = new FileInputStream(input);
+        DataInputStream in = new DataInputStream(fstream);
+        BufferedReader br = new BufferedReader(new InputStreamReader(in));
+
+        //initializing and reading top 3 numbers
+        int inputDim, outputDim, numPairs;
+        inputDim =  Integer.parseInt(br.readLine());
+        outputDim = Integer.parseInt(br.readLine());
+        numPairs = Integer.parseInt(br.readLine());
+
+        //initializing weights
+        double[][] weight = new double[outputDim][inputDim];
+        double[] weightBias = new double[outputDim];
+        //this is the case of random weights
+        if(w == 1) {
+            for(int i = 0; i < outputDim; i++) {
+                weightBias[i] = ThreadLocalRandom.current().nextDouble(-0.5, 0.5);
+                for(int j = 0; j < inputDim; j++)
+                weight[i][j] = ThreadLocalRandom.current().nextDouble(-0.5, 0.5);
+                //System.out.println(weight[i]);
+            }
+        }
+
+        //initializing arrays of variables used in formula
+        ArrayList<Letter> let = new ArrayList<Letter>();
+        int[][] arrX = new int[numPairs][inputDim];
+        int[][] arrT = new int[numPairs][outputDim];
+
+        String line; //temp variable for reading lines
+        for(int i = 0; i < numPairs; i ++) {
+            //read input
+            br.readLine();//blank
+            int pos = 0;
+            //reads all x's and parses them
+            while (!(line = br.readLine()).isEmpty()) {
+                String[] tempRow = line.replaceAll("  ", "~").replaceAll(" -", "~-").replaceAll(" 1", "1").replaceAll(" ", "~").split("~");
+                for (int j = 0; j < tempRow.length; j++) {
+                    arrX[i][pos] = Integer.parseInt(tempRow[j]);
+                    pos++;
+                }
+            }
+
+            line = br.readLine(); //correct testing line, T array
+            //parsing the testing line
+            String[] tempRow = line.replaceAll("  ", "~").replaceAll(" -", "~-").replaceAll(" 1", "1").replaceAll(" ", "~").split("~");
+            //this is for the special case when the first character is a positive 1
+            for (int j = 0; j < tempRow.length; j++) {
+                arrT[i][j] = Integer.parseInt(tempRow[j]);
+            }
+
+            line = br.readLine(); //A1, B1, ect
+            //creating an arraylist of objects to associate letters with correct T values
+            char letter = line.charAt(0);
+            Letter l = new Letter(letter, arrT[i]);
+            if (let.isEmpty()) {
+                let.add(l);
+            } else {
+                int counter = 0;
+                for (int j = 0; i < let.size(); i++) {
+                    if (let.get(j).checkArr(arrT[i][j])) {
+                        counter++;
+                    }
+                }
+                if (counter == 0) {
+                    let.add(l);
+                }
+            }
+        }
+
+        //calls method to train weights
+        weight = WeightTrain(outputDim, inputDim, numPairs, epochs, theta, alpha, arrX, arrT, weight, weightBias);
+
+        //calls method to write the weight file
+        FileWriter(1, output, inputDim, outputDim, numPairs, weight, let, weightBias, theta);
+
+        //goes to testing after finishing training
+        TestDeploy(inputDim, outputDim, numPairs, weight, weightBias, let, theta);
+    }
+
+    private static void FileWriter(int type, String output, int inputDim, int outputDim, int numPairs, double[][] weight, ArrayList<Letter> let, double[] weightBias, double theta) throws IOException {
+        //creates the weght file
+        String name = output;
+        name = name.concat(".txt");
+        FileWriter writer = new FileWriter(name);
+
+        //writes first 3 numbers to file
+        writer.write(inputDim + "\n");
+        writer.write(outputDim + "\n");
+        writer.write(numPairs + "\n");
+        writer.write("\n");
+        //going through all weights and writing them
+        for (int i = 0; i < outputDim; i++) {
+            for (int j = 0; j < inputDim; j++) {
+                writer.write(weight[i][j] + ", ");
+            }
+            writer.write("\n");
+            //the letters
+            writer.write(let.get(i).getLetter() + "\n");
+            for (int j = 0; j < outputDim; j++) {
+                //the associated T values
+                writer.write(let.get(i).getArr(j) + ", ");
+            }
+            writer.write("\n");
+        }
+        writer.write("\n");
+        //now for the weight biases
+        for (int i = 0; i < outputDim; i++) {
+            writer.write(weightBias[i] + ", ");
+        }
+        writer.write("\n" + theta + "\n");
+        writer.close();
+    }
+
+    private static double[][] WeightTrain(int outputDim, int inputDim, int numPairs, int epochs, double theta, double alpha, int[][] arrX, int[][] arrT, double[][] weight, double[] weightBias) {
+    //calculating weights
+        int[] y = new int[outputDim];
+        boolean converge = false;
+        int ecount = 0; //counter for epochs
+        double yIn = 0;
+
+        while (!converge && (ecount != epochs)) {
+            //initializing variables
+            int counter = 0;
+            //temp variables to check if weights and biases change
+            double[] weightTemp = new double[inputDim];
+            double[] biasTemp = new double[outputDim];
+
+            for (int i = 0; i < numPairs; i++) {
+                //checks if the y values are the same as t values
+                boolean checker = false;
+                //goes through and calcluates yin and y values
+                for (int j = 0; j < outputDim; j++) {
+                    yIn = weightBias[j];
+                    for (int k = 0; k < inputDim; k++) {
+                        yIn += weight[j][k] * arrX[i][k];
+                    }
+                    if (yIn > theta)
+                        y[j] = 1;
+                    else if (yIn <= theta && yIn >= -theta)
+                        y[j] = 0;
+                    else if (yIn < -theta)
+                        y[j] = -1;
+                    //checks if y are same as t
+                    if (y[j] != arrT[i][j]) {
+                        checker = true;
+                    }
+                    //only changes weights if the y values are the same as t values
+                    if (checker) {
+                        //updating weights
+                        for (int k = 0; k < inputDim; k++) {
+                            weightTemp[k] = weight[j][k] + alpha * arrX[i][k] * arrT[i][j];
+                            //checks if weights change
+                            if (weight[j][k] != weightTemp[k])
+                                counter++;
+                            weight[j][k] = weightTemp[k];
+                        }
+                        //updating weight bias
+                        biasTemp[j] = weightBias[j] + alpha * arrT[i][j];
+                        //checks if biases change
+                        if (biasTemp[j] != weightBias[j])
+                            counter++;
+                        weightBias[j] = biasTemp[j];
+                    }
+                }
+            }
+            ecount++;
+            if (counter == 0) {
+                converge = true;
+            }
+        }
+        //System.out.println(ecount);
+        return weight;
+    }
+    private static void WeightDeploy(String input) throws IOException {
+        //initializing the file reader
+        FileInputStream fstream = new FileInputStream(input);
+        DataInputStream in = new DataInputStream(fstream);
+        BufferedReader br = new BufferedReader(new InputStreamReader(in));
+        //initiailzing variables and reading first three values
+        int inputDim, outputDim, numPairs;
+        inputDim =  Integer.parseInt(br.readLine());
+        outputDim = Integer.parseInt(br.readLine());
+        numPairs = Integer.parseInt(br.readLine());
+        //initialzing other variables
+        String line;
+        String[] temp;
+        ArrayList<Letter> let = new ArrayList<Letter>(outputDim);
+        br.readLine(); //blank
+        //parsing the weights, letters, and t values
+        double[][] weights = new double[outputDim][inputDim];
+        for(int i = 0; i < outputDim; i++) {
+            line = br.readLine();
+            temp = line.split(", ");
+            //weights
+            for(int j = 0; j < inputDim; j++) {
+                weights[i][j] = Double.parseDouble(temp[j]);
+            }
+            //letter
+            char s = br.readLine().charAt(0);
+            //t values
+            line = br.readLine();
+            temp = line.split(", ");
+            int[] arr = new int[outputDim];
+            for(int j = 0; j < outputDim; j++) {
+                arr[j] = Integer.parseInt(temp[j]);
+            }
+            //puts combinations of letters and t values into an arraylist
+            Letter l = new Letter(s, arr);
+            let.add(l);
+        }
+        br.readLine(); //blank
+        //this is weight bias
+        line = br.readLine();
+        double[] bias = new double [outputDim];
+        temp = line.split(", ");
+        for(int i = 0; i < outputDim; i++) {
+            bias[i] = Double.parseDouble(temp[i]);
+        }
+        //reading theta value
+        line = br.readLine();
+        double theta = Double.parseDouble(line);
+        TestDeploy(inputDim, outputDim, numPairs, weights, bias, let, theta);
+    }
+
+    public static void TestDeploy(int inD, int outD, int numP, double[][] weights, double[] bias, ArrayList<Letter> let, double theta) throws IOException {
+        //getting more user input for testing
+        String input = "";
+        String output = "";
+        Scanner keyboard = new Scanner(System.in);
+        System.out.println("Enter 1 to test/deploy using a testing/deploying data file, enter 2 to quit");
+        int cmd = Integer.parseInt(keyboard.nextLine());
+        if(cmd == 1) {
+            System.out.println("Enter the testing/deploying data file name:");
+            input = keyboard.nextLine();
+            input = input.concat(".txt");
+            System.out.println("You entered: "+input);
+            System.out.println("Enter a file name to save the testing/deploying results:");
+            output = keyboard.nextLine();
+            output = output.concat(".txt");
+            System.out.println("You entered: "+output);
+        }
+        if(cmd == 2) {
+            System.exit(1);
+        }
+        //reading the file to be tested
+        FileInputStream fstream = new FileInputStream(input);
+        DataInputStream in = new DataInputStream(fstream);
+        BufferedReader br = new BufferedReader(new InputStreamReader(in));
+        int inputDim =  Integer.parseInt(br.readLine());
+        int outputDim = Integer.parseInt(br.readLine());
+        int numPairs = Integer.parseInt(br.readLine());
+        if(inputDim != inD) {
+            System.out.println("The Input Dimension of the files do not match.");
+            System.exit(1);
+        }
+        if(outputDim != outD) {
+            System.out.println("The Output Dimension of the files do not match.");
+            System.exit(1);
+        }
+        if(numPairs != numP) {
+            System.out.println("The Number of Pairs in the files do not match.");
+            System.exit(1);
+        }
+        int[] arrX = new int[inputDim];
+        int[] arrT = new int[outputDim];
+        int[]y = new int[outputDim];
+
+        //then we pass in values to our weight testing method
+        TestWeight(input, output, inputDim, outputDim, numPairs, arrX, arrT, bias, weights, theta, y, let);
+        //System.exit(1);
+    }
+    private static void TestWeight(String input, String output, int inputDim, int outputDim, int numPairs, int[] arrX, int arrT[], double[] bias, double[][] weights, double theta, int[] y, ArrayList<Letter> let) throws IOException {
+        //this is same as above
+        FileInputStream fstream = new FileInputStream(input);
+        DataInputStream in = new DataInputStream(fstream);
+        BufferedReader br = new BufferedReader(new InputStreamReader(in));
+        String line;
+        FileWriter writer = new FileWriter (output);
+        br.readLine();//63
+        br.readLine();//7
+        br.readLine();//21
+        for(int i = 0; i < numPairs; i ++) {
+            //read input
+            br.readLine();//blank
+            int pos = 0;
+            while (!(line = br.readLine()).isEmpty()) { //read all x's
+                String[] tempRow = line.replaceAll("  ", "~").replaceAll(" -", "~-").replaceAll(" 1", "1").replaceAll(" ", "~").split("~");
+                for (int j = 0; j < tempRow.length; j++) {
+                    //System.out.println("i: "+i);
+                    //System.out.println("j: "+j);
+                    arrX[pos] = Integer.parseInt(tempRow[j]);
+                    pos++;
+                }
+            }
+            line = br.readLine(); //correct testing line
+            String[] tempRow = line.replaceAll("  ", "~").replaceAll(" -", "~-").replaceAll(" 1", "1").replaceAll(" ", "~").split("~");
+            for (int j = 0; j < tempRow.length; j++) {
+                arrT[j] = Integer.parseInt(tempRow[j]);
+            }
+            line = br.readLine(); //A1, B1, ect
+            char letter = line.charAt(0);
+            for(int j = 0;j < outputDim; j++) {
+                double yIn = bias[j];
+                for(int k = 0; k < inputDim; k++) {
+                    yIn += arrX[k] * weights[j][k];
+                }
+                if (yIn > theta)
+                    y[j] = 1;
+                else if (yIn <= theta && yIn >= -theta)
+                    y[j] = 0;
+                else if (yIn < -theta)
+                    y[j] = -1;
+            }
+            int classified = -1;
+            for(int j = 0; j < outputDim; j++) {
+                boolean check = true;
+                for(int k = 0; k < outputDim; k++) {
+                    if(y[k] != let.get(j).getArr(k)) {
+                        check = false;
+                    }
+                }
+                if(check == true) {
+                    classified = j;
+                    break;
+                }
+            }
+            writer.write("Actual Output:\n");
+            writer.write(letter+"\n");
+            for(int j = 0; j < outputDim; j++) {
+                writer.write(arrT[j]+" ");
+            }
+            writer.write("\n");
+            writer.write("Classified Output:\n");
+            if(classified == -1) {
+                writer.write("unknown");
+            }
+            else {
+                writer.write(let.get(classified).getLetter()+"\n");
+                for(int j = 0; j < outputDim; j++) {
+                    writer.write(let.get(classified).getArr(j)+" ");
+                }
+            }
+            writer.write("\n\n");
+        }
+        writer.close();
+    }
+}
